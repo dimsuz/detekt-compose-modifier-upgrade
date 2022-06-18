@@ -31,8 +31,10 @@ library
     -- other-extensions:
     build-depends:    base ^>=4.14.3.0
                     , turtle
+                    , foldl
     hs-source-dirs:   src
     default-language: Haskell2010
+    default-extensions: OverloadedStrings
 
 executable detekt-compose-modifier-upgrade
     main-is:          Main.hs
