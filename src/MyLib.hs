@@ -3,11 +3,15 @@
 module MyLib (migrate) where
 
 import qualified Control.Foldl as Fold
-import Control.Lens (makeLenses)
+import Control.Lens (makeLenses, snoc)
 import Control.Monad.State
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
+import qualified Data.List as List
 import Data.Maybe (fromJust, isJust)
+import Data.Ord (comparing)
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Turtle
 
 findSwappableModifier :: Shell Line -> Maybe (Int, Int)
@@ -22,10 +26,9 @@ data ParseState = ParseState
 
 makeLenses ''ParseState
 
--- IntMap.insert modPos optPos - 1 list; 135 -> 137
--- repeat (optPos - modPos - 1)
--- IntMap.insert (modPos + 1) modPos list; 136 -> 135
--- IntMap.insert (modPos + 2) (modPos + 1) list; 137 -> 136
+-- First move the modifier line to be above the first optional parameter,
+-- and then move each line below the modifier up to one line.
+-- If modifier is already above the first optional parameter then do nothing
 reorderParams :: Int -> Int -> IntMap Int
 reorderParams modPos optPos
   | modPos == optPos - 1 = IntMap.empty
@@ -51,22 +54,28 @@ swapPositionsFold = Fold step begin done
             | hasOptionalParam = Nothing -- reset when found optional
             | otherwise = pos
           swapPositions
+            -- modifier + optional params
             | isJust pos && hasOptionalParam = list <> reorderParams (fromJust pos) (lineNo + 1)
+            -- modifier + only required params
+            | isJust pos && isDeclarationEnd = list <> reorderParams (fromJust pos) (lineNo + 1)
             | otherwise = list
        in ParseState modifierPosition swapPositions (lineNo + 1)
     done (ParseState pos list lineNo) = list
 
-findModifier :: MonadIO io => Shell Line -> StateT ParseState io (IntMap Int)
-findModifier inputLines = do
-  s <- get
-  liftIO $ putStrLn ("got state " <> show s)
-  pure IntMap.empty
+swappedOrder :: IntMap Int -> Int -> Int -> Ordering
+swappedOrder ps line1 line2 = compare (IntMap.findWithDefault line1 line1 ps) (IntMap.findWithDefault line2 line2 ps)
 
 processFile :: MonadIO io => FilePath -> io ()
 processFile path = do
   let inputLines = input path
   liftIO $ putStrLn ("processing file " <> path)
   swapPositions <- fold inputLines swapPositionsFold
+  unless (null swapPositions) $ do
+    list <- zip [1 ..] <$> fold (lineToText <$> inputLines) Fold.list
+    let sorted = map (unsafeTextToLine . snd) $ List.sortBy (\l1 l2 -> swappedOrder swapPositions (fst l1) (fst l2)) list
+    update (\_ -> select sorted) path
+  -- liftIO $ unless (null $ match (ends "TopAppBar.kt") (format fp path)) (T.putStrLn (mconcat (map snd sorted)))
+  --sortBy (swappedOrder swapPositions) inputLines
   -- swapPositions <- evalStateT (findModifier inputLines) (ParseState Nothing IntMap.empty 0)
   liftIO $ putStrLn ("  swap positions " <> show swapPositions)
 
